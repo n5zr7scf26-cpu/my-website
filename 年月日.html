@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>日历</title>
+    <style>
+        :root {
+            --main-red: #c0392b; /* 统一的节日红 */
+            --big-month: #e74c3c;
+            --small-month: #3498db;
+            --feb-color: #9b59b6;
+            --bg-color: #f8f9fa;
+        }
+        body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg-color); display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .card { background: white; padding: 30px; border-radius: 24px; box-shadow: 0 15px 45px rgba(0,0,0,0.1); width: 100%; max-width: 1100px; text-align: center; }
+        
+        /* 控制区 */
+        .year-controller { background: #2c3e50; color: white; padding: 25px; border-radius: 20px; margin-bottom: 30px; }
+        .year-input { width: 160px; padding: 10px; border-radius: 10px; font-size: 36px; font-weight: bold; text-align: center; margin: 0 15px; border: none; outline: none; background: #fff; color: #2c3e50; }
+        .year-btn { background: #34495e; color: white; border: 2px solid #5d6d7e; padding: 12px 25px; border-radius: 12px; cursor: pointer; font-size: 20px; }
+        
+        /* 网格布局 */
+        .months-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; }
+        .month-item { background: white; border: 3px solid #ddd; border-radius: 16px; cursor: pointer; transition: 0.3s; position: relative; overflow: hidden; }
+        .month-item.up { border-color: var(--big-month); }
+        .month-item.valley { border-color: var(--small-month); }
+        .month-item.feb { border-color: var(--feb-color); }
+        .month-item.active { grid-column: span 3; z-index: 10; border-width: 4px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+
+        .month-name { padding: 12px; font-weight: bold; font-size: 28px; color: white; }
+        .big-head { background: var(--big-month); }
+        .small-head { background: var(--small-month); }
+        .feb-head { background: var(--feb-color); }
+
+        /* 日历数字内容 */
+        .cal-content { max-height: 0; opacity: 0; overflow: hidden; display: grid; grid-template-columns: repeat(7, 1fr); background: #fff; transition: 0.5s ease; }
+        .month-item.active .cal-content { max-height: 800px; opacity: 1; padding: 25px 10px; }
+        
+        .cell { position: relative; font-size: 26px; padding: 22px 0; font-weight: bold; color: #2c3e50; border-radius: 10px; }
+        .week-head { font-size: 18px; color: #95a5a6; border-bottom: 2px solid #eee; margin-bottom: 10px; }
+        .weekend { color: #e74c3c; background: #fff8f8; }
+
+        /* 统一节日样式：全部红点红标 */
+        .holiday-dot { position: absolute; top: 10px; right: 10px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; background: var(--main-red); box-shadow: 0 0 3px rgba(0,0,0,0.3); }
+        .holiday-label { position: absolute; bottom: 6px; left: 0; right: 0; font-size: 12px; font-weight: bold; color: var(--main-red); }
+
+        /* 统一弹窗 */
+        #holidayToast {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(192, 57, 43, 0.98); color: white; padding: 30px 60px;
+            border-radius: 20px; font-size: 32px; font-weight: bold;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4); display: none; z-index: 9999;
+            text-align: center; border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="year-controller">
+        <button class="year-btn" onclick="adjustYear(-1)">上一年</button>
+        <input type="number" id="yearBox" class="year-input" value="2026" onchange="buildLab()">
+        <button class="year-btn" onclick="adjustYear(1)">下一年</button>
+        <div id="yearStatus" style="margin-top:15px; font-size:22px;"></div>
+    </div>
+
+    <h1 style="font-size: 52px; margin: 0 0 10px 0;">日历</h1>
+    <p style="color: #7f8c8d; font-size: 18px; margin-bottom: 30px;">● 统一节日标注 ●</p >
+    
+    <div class="months-grid" id="mainGrid"></div>
+</div>
+
+<div id="holidayToast">节日快乐</div>
+
+<script>
+    // 整合所有节日
+    const staticHolidays = {
+        '1-1': '元旦', '3-8': '妇女节', '3-12': '植树节', '5-1': '劳动节',
+        '5-4': '青年节', '6-1': '儿童节', '8-1': '建军节', '9-10': '教师节', '10-1': '国庆节'
+    };
+
+    function getLunarHolidays(year) {
+        const lunarMap = {};
+        const festivals = [
+            { name: '春节', month: 1, day: 1 }, { name: '元宵节', month: 1, day: 15 },
+            { name: '端午节', month: 5, day: 5 }, { name: '七夕节', month: 7, day: 7 },
+            { name: '中秋节', month: 8, day: 15 }, { name: '重阳节', month: 9, day: 9 },
+            { name: '腊八节', month: 12, day: 8 }
+        ];
+        for (let m = 0; m < 12; m++) {
+            for (let d = 1; d <= 31; d++) {
+                let date = new Date(year, m, d);
+                if (date.getMonth() !== m) break;
+                let lunarStr = date.toLocaleDateString('zh-CN-u-ca-chinese', {month:'numeric', day:'numeric'});
+                festivals.forEach(f => {
+                    if (lunarStr === `${f.month}月${f.day}`) lunarMap[`${m + 1}-${d}`] = f.name;
+                });
+                let tom = new Date(year, m, d + 1);
+                if (tom.toLocaleDateString('zh-CN-u-ca-chinese', {month:'numeric', day:'numeric'}) === '1月1') lunarMap[`${m + 1}-${d}`] = '除夕';
+            }
+        }
+        return lunarMap;
+    }
+
+    function isLeapYear(y) { return (y % 100 === 0) ? (y % 400 === 0) : (y % 4 === 0); }
+    function adjustYear(offset) { document.getElementById('yearBox').value = parseInt(document.getElementById('yearBox').value) + offset; buildLab(); }
+
+    function showHoliday(name) {
+        const toast = document.getElementById('holidayToast');
+        toast.innerHTML = `🏮<br>${name}`;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 1800);
+    }
+
+    function buildLab() {
+        const year = parseInt(document.getElementById('yearBox').value) || 2026;
+        const grid = document.getElementById('mainGrid');
+        const lunarHolidays = getLunarHolidays(year);
+        grid.innerHTML = '';
+        document.getElementById('yearStatus').innerText = `${year}年 (${isLeapYear(year)?'闰年':'平年'})`;
+
+        for (let m = 1; m <= 12; m++) {
+            const firstDay = new Date(year, m - 1, 1).getDay();
+            const totalDays = new Date(year, m, 0).getDate();
+            const headClass = totalDays === 31 ? 'big-head' : (m === 2 ? 'feb-head' : 'small-head');
+
+            const item = document.createElement('div');
+            item.className = `month-item ${totalDays === 31 ? 'up' : (m===2?'feb':'valley')}`;
+            item.onclick = function(e) {
+                if(e.target.closest('.cell')) return;
+                const wasActive = this.classList.contains('active');
+                document.querySelectorAll('.month-item').forEach(el => el.classList.remove('active'));
+                if (!wasActive) this.classList.add('active');
+            };
+
+            let calHtml = `<div class="month-name ${headClass}">${m}月</div><div style="font-weight:bold; color:#888; padding:8px;">${totalDays}天</div><div class="cal-content">`;
+            ['日','一','二','三','四','五','六'].forEach((w,i)=>calHtml+=`<div class="cell week-head ${i===0||i===6?'weekend':''}">${w}</div>`);
+            for(let s=0; s<firstDay; s++) calHtml += `<div class="cell"></div>`;
+            for(let d=1; d<=totalDays; d++) {
+                // 统一获取节日名称
+                const hName = lunarHolidays[`${m}-${d}`] || staticHolidays[`${m}-${d}`];
+                const dayOfWeek = (firstDay + d - 1) % 7;
+                calHtml += `
+                    <div class="cell ${dayOfWeek===0||dayOfWeek===6?'weekend':''}" 
+                         onclick="event.stopPropagation(); ${hName ? `showHoliday('${hName}')` : ''}">
+                        ${d}
+                        ${hName ? `<div class="holiday-dot"></div><div class="holiday-label">${hName}</div>` : ''}
+                    </div>`;
+            }
+            item.innerHTML = calHtml + `</div>`;
+            grid.appendChild(item);
+        }
+    }
+    buildLab();
+</script>
+</body>
+</html>
